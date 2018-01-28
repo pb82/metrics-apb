@@ -189,6 +189,31 @@
       - name: grafana-log
         empty_dir:
 
+- name: create the fluentd deployment config
+  openshift_v1_deployment_config:
+    name: fluentd
+    namespace: '{{ namespace }}'
+    labels:
+      app: fluentd
+      service: fluentd
+    replicas: 1
+    selector:
+      app: fluentd
+      service: fluentd
+    spec_template_metadata_labels:
+      app: fluentd
+      service: fluentd
+    spec_template_spec_service_account_name: '{{ proxy_serviceaccount_name }}'
+    containers:
+    - name: fluentd
+      image: 'pb82/fluentd-prometheus:latest'
+      imagePullPolicy: IfNotPresent
+      ports:
+      - containerPort: 24231
+        name: metrics-port
+      - containerPort: 9880
+        name: push-port
+
 - name: create prometheus service
   k8s_v1_service:
     name: prometheus
@@ -249,6 +274,38 @@
         port: 80
         target_port: '{{ grafana_port }}'
 
+- name: create internal fluentd service
+  k8s_v1_service:
+    name: fluentd-internal
+    namespace: '{{ namespace }}'
+    annotations:
+      org.aerogear.metrics/plain_endpoint: /metrics
+    labels:
+      app: fluentd
+      service: fluentd
+    selector:
+      app: fluentd
+      service: fluentd
+    ports:
+      - name: metrics-port
+        port: 80
+        targetPort: metrics-port
+
+- name: create fluentd push service
+  k8s_v1_service:
+    name: fluentd
+    namespace: '{{ namespace }}'
+    labels:
+      app: fluentd
+      service: fluentd
+    selector:
+      app: fluentd
+      service: fluentd
+    ports:
+      - name: push-port
+        port: 443
+        targetPort: push-port
+
 - name: create grafana route
   openshift_v1_route:
     name: grafana
@@ -272,6 +329,17 @@
     spec_port_target_port: web
     spec_tls_termination: edge
   register: prometheus_route
+
+- name: create fluentd route
+  openshift_v1_route:
+    name: fluentd
+    namespace: '{{ namespace }}'
+    labels:
+      app: fluentd
+      service: prometheus
+    to_name: fluentd
+    spec_port_target_port: push-port
+    spec_tls_termination: edge
 
 - name: "Create prometheus secret yaml file"
   template:
